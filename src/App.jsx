@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from "react";
 const SNAP_MINUTES = 1;
 const PALETTE = [
   "#EF4444","#F97316","#EAB308","#22C55E","#06B6D4",
-  "#3B82F6","#8B5CF6","#EC4899","#fe7c91","#14B8A6",
+  "#3B82F6","#8B5CF6","#EC4899","#F43F5E","#14B8A6",
 ];
 const STORAGE_KEY = "timerapp_v2";
 const TICK_LEFT = 42; // px - wider padding for tick labels
@@ -68,15 +68,21 @@ export default function App() {
     setTasks(ts => ts.filter(t => !t.createdAt || t.createdAt > cutoff));
   }, [currentEpoch]);
 
-  // Auto-place daily backpack items once per day
+  // Auto-place daily/weekly backpack items once per day
   useEffect(() => {
     const lastDate = stored.lastAutoPlaceDate;
     if (lastDate === todayStr) return;
-    const dailyItems = backpack.filter(b => b.daily);
-    if (dailyItems.length === 0) return;
+    const todayDow = new Date().getDay(); // 0=日,1=月,...,6=土
+    const autoItems = backpack.filter(b =>
+      b.daily || (b.weekdays && b.weekdays.includes(todayDow))
+    );
+    if (autoItems.length === 0) {
+      saveStorage({ ...loadStorage(), lastAutoPlaceDate: todayStr });
+      return;
+    }
     setTasks(ts => {
       let next = [...ts];
-      dailyItems.forEach(template => {
+      autoItems.forEach(template => {
         const alreadyToday = next.some(t => t.name === template.name && t.placedDate === todayStr);
         if (alreadyToday) return;
         const last = next.filter(t => t.name === template.name).sort((a,b) => b.end - a.end)[0];
@@ -388,21 +394,58 @@ export default function App() {
           {showBackpack && (
             <div style={{ marginTop:6, maxHeight:220, overflowY:"auto" }}>
               {backpack.length===0 && <div style={{fontSize:11,color:"#475569",padding:4}}>保存なし</div>}
-              {backpack.map((b,i)=>(
-                <div key={i} style={{ display:"flex", alignItems:"center", gap:5, padding:"6px 8px", marginBottom:4,
-                  background:"#0f172a", borderRadius:4, borderLeft:`3px solid ${b.color}` }}>
-                  <span onClick={()=>applyBackpack(b)} style={{ fontSize:12,color:"#e2e8f0",flex:1,cursor:"pointer" }}>{b.name}</span>
-                  <div onClick={()=>setBackpack(bp=>bp.map((x,j)=>j===i?{...x,daily:!x.daily}:x))}
-                    style={{ display:"flex",alignItems:"center",gap:3,cursor:"pointer",padding:"2px 6px",borderRadius:10,
-                      background:b.daily?"#166534":"#1e293b",border:b.daily?"1px solid #22c55e":"1px solid #334155",flexShrink:0 }}>
-                    <div style={{ width:8,height:8,borderRadius:"50%",background:b.daily?"#22c55e":"#475569" }}/>
-                    <span style={{ fontSize:9,color:b.daily?"#22c55e":"#475569",whiteSpace:"nowrap" }}>毎日</span>
+              {backpack.map((b,i)=>{
+                const DOW_LABELS = ["日","月","火","水","木","金","土"];
+                const weekdays = b.weekdays || [];
+                const hasWeekday = weekdays.length > 0;
+                return (
+                  <div key={i} style={{ marginBottom:6, background:"#0f172a", borderRadius:4, borderLeft:`3px solid ${b.color}`, overflow:"hidden" }}>
+                    {/* 1行目: 名前・毎日・曜日・適用・削除 */}
+                    <div style={{ display:"flex", alignItems:"center", gap:5, padding:"6px 8px" }}>
+                      <span onClick={()=>applyBackpack(b)} style={{ fontSize:12,color:"#e2e8f0",flex:1,cursor:"pointer",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap" }}>{b.name}</span>
+                      {/* 毎日トグル */}
+                      <div onClick={()=>setBackpack(bp=>bp.map((x,j)=>j===i?{...x,daily:!x.daily}:x))}
+                        style={{ display:"flex",alignItems:"center",gap:3,cursor:"pointer",padding:"2px 5px",borderRadius:10,flexShrink:0,
+                          background:b.daily?"#166534":"#1e293b",border:b.daily?"1px solid #22c55e":"1px solid #334155" }}>
+                        <div style={{ width:7,height:7,borderRadius:"50%",background:b.daily?"#22c55e":"#475569" }}/>
+                        <span style={{ fontSize:9,color:b.daily?"#22c55e":"#475569",whiteSpace:"nowrap" }}>毎日</span>
+                      </div>
+                      {/* 曜日トグル */}
+                      <div onClick={()=>setBackpack(bp=>bp.map((x,j)=>j===i?{...x,weekdays: hasWeekday?[]:[1]}:x))}
+                        style={{ display:"flex",alignItems:"center",gap:3,cursor:"pointer",padding:"2px 5px",borderRadius:10,flexShrink:0,
+                          background:hasWeekday?"#1e3a5f":"#1e293b",border:hasWeekday?"1px solid #3b82f6":"1px solid #334155" }}>
+                        <div style={{ width:7,height:7,borderRadius:"50%",background:hasWeekday?"#3b82f6":"#475569" }}/>
+                        <span style={{ fontSize:9,color:hasWeekday?"#3b82f6":"#475569",whiteSpace:"nowrap" }}>曜日</span>
+                      </div>
+                      <span onClick={()=>applyBackpack(b)} style={{ fontSize:10,color:"#60a5fa",cursor:"pointer",whiteSpace:"nowrap",flexShrink:0 }}>適用</span>
+                      <button onClick={()=>deleteBackpack(i)}
+                        style={{ background:"none",border:"none",color:"#ef4444",fontSize:14,cursor:"pointer",padding:"0 2px",lineHeight:1,flexShrink:0 }}>×</button>
+                    </div>
+                    {/* 2行目: 曜日チェックボックス (曜日トグルがオンの時) */}
+                    {hasWeekday && (
+                      <div style={{ display:"flex", gap:4, padding:"0 8px 8px", flexWrap:"wrap" }}>
+                        {DOW_LABELS.map((label, dow) => {
+                          const active = weekdays.includes(dow);
+                          return (
+                            <div key={dow} onClick={()=>setBackpack(bp=>bp.map((x,j)=>{
+                              if(j!==i) return x;
+                              const ww = x.weekdays||[];
+                              return {...x, weekdays: active ? ww.filter(d=>d!==dow) : [...ww,dow]};
+                            }))}
+                              style={{ width:28,height:28,borderRadius:6,display:"flex",alignItems:"center",justifyContent:"center",
+                                cursor:"pointer",fontSize:11,fontWeight:600,flexShrink:0,
+                                background:active?"#1d4ed8":"#0f172a",
+                                color:active?"#fff":"#475569",
+                                border:active?"1px solid #3b82f6":"1px solid #334155" }}>
+                              {label}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
-                  <span onClick={()=>applyBackpack(b)} style={{ fontSize:10,color:"#60a5fa",cursor:"pointer",whiteSpace:"nowrap",flexShrink:0 }}>適用</span>
-                  <button onClick={()=>deleteBackpack(i)}
-                    style={{ background:"none",border:"none",color:"#ef4444",fontSize:14,cursor:"pointer",padding:"0 2px",lineHeight:1,flexShrink:0 }}>×</button>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
